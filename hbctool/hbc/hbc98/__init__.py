@@ -1,6 +1,6 @@
 from hbctool.util import *
 from .parser import parse, export, INVALID_LENGTH
-from .translator import disassemble, assemble
+from .translator import disassemble, assemble, instruction_length
 from struct import pack, unpack
 
 NullTag = 0
@@ -34,9 +34,14 @@ class HBC98:
             end = start + functionHeader["bytecodeSizeInBytes"]
             bc = inst[start:end]
             try:
-                rebuilt = assemble(disassemble(bc))
-                functionHeader["clean"] = bytes(rebuilt) == bytes(bc)
+                # instruction region only; switch tables are the tail
+                ilen = instruction_length(bc)
+                functionHeader["ilen"] = ilen
+                instr = bc[:ilen]
+                rebuilt = assemble(disassemble(instr))
+                functionHeader["clean"] = bytes(rebuilt) == bytes(instr)
             except Exception:
+                functionHeader["ilen"] = functionHeader["bytecodeSizeInBytes"]
                 functionHeader["clean"] = False
 
     def export(self, f):
@@ -72,8 +77,9 @@ class HBC98:
 
         instOffset = self.getObj()["instOffset"]
         start = offset - instOffset
-        end = start + bytecodeSizeInBytes
-        bc = self.getObj()["inst"][start:end]
+        # instruction region only; the [ilen:] tail (switch tables) is left as-is
+        ilen = functionHeader.get("ilen", bytecodeSizeInBytes)
+        bc = self.getObj()["inst"][start:start + ilen]
         insts = bc
         if disasm:
             # couldn't decode this one cleanly; empty body, bytes kept on write
@@ -114,6 +120,7 @@ class HBC98:
 
         offset = functionHeader["offset"]
         bytecodeSizeInBytes = functionHeader["bytecodeSizeInBytes"]
+        ilen = functionHeader.get("ilen", bytecodeSizeInBytes)
 
         instOffset = self.getObj()["instOffset"]
         start = offset - instOffset
@@ -123,9 +130,14 @@ class HBC98:
         if disasm:
             bc = assemble(insts)
 
-        assert len(bc) <= bytecodeSizeInBytes, "Overflowed instruction length is not supported yet."
-        functionHeader["bytecodeSizeInBytes"] = len(bc)
-        memcpy(self.getObj()["inst"], bc, start, len(bc))
+        if ilen < bytecodeSizeInBytes:
+            # switch tables at [ilen:]; rewrite instructions only, keep size
+            assert len(bc) <= ilen, "Overflowed instruction length is not supported yet."
+            memcpy(self.getObj()["inst"], bc, start, len(bc))
+        else:
+            assert len(bc) <= bytecodeSizeInBytes, "Overflowed instruction length is not supported yet."
+            functionHeader["bytecodeSizeInBytes"] = len(bc)
+            memcpy(self.getObj()["inst"], bc, start, len(bc))
         
     def getStringCount(self):
         return self.getObj()["header"]["stringCount"]

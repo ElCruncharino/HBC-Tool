@@ -1,5 +1,6 @@
 import pathlib
 import json
+import struct
 from hbctool.util import *
 
 basepath = pathlib.Path(__file__).parent.absolute()
@@ -58,5 +59,50 @@ def assemble(insts):
             assert oper_t in operand_type, f"Malicious operand type: {oper_t}"
             _, _, conv_from = operand_type[oper_t]
             bc += conv_from(val)
-    
+
     return bc
+
+
+_UIS = opcode_mapper_inv.get("UIntSwitchImm")
+_SIS = opcode_mapper_inv.get("StringSwitchImm")
+
+def _inst_size(op):
+    return sum(operand_type[o[:-2] if o.endswith(":S") else o][0]
+               for o in opcode_operand[opcode_mapper[op]])
+
+def instruction_length(bc):
+    """Byte length of the instruction part of a function, i.e. where the
+    appended switch jump-tables start (or len(bc) if there are none).
+
+    Hermes puts the UIntSwitchImm/StringSwitchImm jump-tables after a function's
+    instructions, so a linear scan runs straight into that data and desyncs.
+    Find the earliest table and stop there; the caller decodes [0:this] and
+    keeps the tail as-is.
+
+    Table starts at align4(ip + tableOffset). The tableOffset operand is a
+    UInt32 at +2 for UIntSwitchImm, +6 for StringSwitchImm. Function bytecode is
+    4-byte aligned, so aligning the relative offset matches runtime.
+    """
+    b = bytes(bc)
+    L = len(b)
+    data_start = L
+    i = 0
+    while i < data_start:
+        op = b[i]
+        if op >= len(opcode_mapper):
+            return L  # can't decode; caller treats the function as non-clean
+        st = i
+        nxt = i + 1 + _inst_size(op)
+        if nxt > L:
+            return L
+        if op == _UIS:
+            table_off = struct.unpack_from("<I", b, st + 2)[0]
+            data_start = min(data_start, (st + table_off + 3) & ~3)
+        elif op == _SIS:
+            table_off = struct.unpack_from("<I", b, st + 6)[0]
+            data_start = min(data_start, (st + table_off + 3) & ~3)
+        if nxt > data_start:
+            # next instruction would run into the table region; stop here
+            break
+        i = nxt
+    return i
