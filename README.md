@@ -85,6 +85,27 @@ hbctool currently supports the following Hermes Bytecode version:
 - [Hermes Bytecode version 94](/hbctool/hbc/hbc94/) [New]
 - [Hermes Bytecode version 95](/hbctool/hbc/hbc95/) [New]
 - [Hermes Bytecode version 96](/hbctool/hbc/hbc96/) [New]
+- [Hermes Bytecode version 98](/hbctool/hbc/hbc98/) [New]
+
+### Note on HBC98 (Static Hermes)
+
+HBC98 (shipped by recent React Native / Expo apps built on the Static Hermes
+line) reworked the bytecode format. Relative to HBC96:
+
+* the `SmallFuncHeader` bit layout changed: `bytecodeSizeInBytes` is 14 bits
+  (not 15), `functionName` shrank, and `LoopDepth` / `NumberRegCount` /
+  `NonPtrRegCount` were added. The overflow offset is packed as
+  `(functionName << 24) | offset`.
+* `infoOffset` / `environmentSize` were dropped from the function header.
+* the array/object literal buffers became a literal value buffer + object shape
+  table, and some opcodes were added/renumbered.
+* `UIntSwitchImm` / `StringSwitchImm` jump-tables are appended after a
+  function's instructions and are kept as-is across a round trip.
+
+The opcode table matches the corresponding upstream Hermes revision (checked
+against P1sec's `hermes-dec`). As a safety net, any function that doesn't
+survive a disassemble/reassemble round trip is left byte-for-byte untouched on
+output, so unrelated code can't be corrupted.
 
 
 ## Contribution

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import re
+import struct
 
 def write_func(f, func, i, hbc):
     functionName, paramCount, registerCount, symbolCount, insts, _ = func
@@ -14,10 +15,17 @@ def write_func(f, func, i, hbc):
         ss = []
         for ii, v in enumerate(operands):
             t, is_str, val = v
-            o.append(f"{t}:{val}")
+            if t == "Double":
+                # exact LE bytes, not str(float) which loses NaN payloads / -0.0
+                o.append(f"{t}:{struct.pack('<d', val).hex()}")
+            else:
+                o.append(f"{t}:{val}")
 
             if is_str:
-                s, _ = hbc.getString(val)
+                try:
+                    s, _ = hbc.getString(val)
+                except (AssertionError, IndexError):
+                    s = ""
                 ss.append((ii, val, s))
                 
         
@@ -89,7 +97,7 @@ def read_all_func(hasm, hbc):
 def read_func(func_asms, i):
     func_asm = func_asms[i]
 
-    m = re.search(r"Function<.*?>([0-9]+)\(([0-9]+) params, ([0-9]+) registers,\s?([0-9]+) symbols\):\n(.+?)\nEndFunction", func_asm, re.DOTALL)
+    m = re.search(r"Function<.*?>([0-9]+)\(([0-9]+) params, ([0-9]+) registers,\s?([0-9]+) symbols\):\n(.*?)EndFunction", func_asm, re.DOTALL)
     assert m, f"Malicious function header: {func_asm}"
 
     functionName = m.group(1)
@@ -117,7 +125,7 @@ def read_func(func_asms, i):
             oper_t, val = oper.replace(",", "").split(":")
             
             if oper_t == 'Double':
-                val = float(val)
+                val = struct.unpack('<d', bytes.fromhex(val))[0]
             else:
                 val = int(val)
             

@@ -1,5 +1,6 @@
 
 from hbctool.util import *
+from hbctool.hbc.hbc98 import HBC98
 from hbctool.hbc.hbc96 import HBC96
 from hbctool.hbc.hbc95 import HBC95
 from hbctool.hbc.hbc94 import HBC94
@@ -28,6 +29,7 @@ INIT_HEADER = {
 BYTECODE_ALIGNMENT = 4
 
 HBC = {
+    98: HBC98,
     96: HBC96,
     95: HBC95,
     94: HBC94,
