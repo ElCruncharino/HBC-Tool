@@ -152,6 +152,13 @@ class HBC76:
         assert l <= length, "Overflowed string length is not supported yet."
 
         memcpy(stringStorage, s, offset, len(s))
+        if l < length:
+            # shrinking: truncate the declared length too, or getString() (and
+            # the final file) would still serve the old trailing bytes past it
+            if stringTableEntry["length"] >= INVALID_LENGTH:
+                stringTableOverflowEntry["length"] = l
+            else:
+                stringTableEntry["length"] = l
 
     def _checkBufferTag(self, buf, iid):
         keyTag = buf[iid]

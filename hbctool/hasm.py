@@ -245,8 +245,16 @@ def load(path):
 
     version = hbc.getVersion()
 
+    # strings can share overlapping storage; track intended-per-id values
+    # (not live storage) so an edit doesn't make an untouched neighbor look
+    # "changed" too, while a duplicate id or an out-of-range id still behaves
+    # like a plain unconditional setString (last one wins, invalid id asserts)
+    current = {sid: hbc.getString(sid)[0] for sid in {s["id"] for s in strings}}
     for string in strings:
-        hbc.setString(string["id"], string["value"])
+        sid = string["id"]
+        if current.get(sid) != string["value"]:
+            hbc.setString(sid, string["value"])
+            current[sid] = string["value"]
 
     func_asms = read_all_func(hasm_content, hbc, version)
     for i in range(len(func_asms)):
