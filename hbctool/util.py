@@ -104,6 +104,7 @@ class BitWriter(object):
         self.out.write(bytes((self.accumulator,)))
         self.accumulator = 0
         self.bcount = 0
+        self.write += 1
         return pad
 
     def close(self):
