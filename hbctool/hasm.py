@@ -17,8 +17,8 @@ import hbctool.hbc as hbcl
 import json
 import os
 import shutil
-import struct
 import re
+import sys
 
 
 def write_func(f, func, i, hbc, version):
@@ -51,12 +51,21 @@ def write_func(f, func, i, hbc, version):
         ss = []
         for ii, v in enumerate(operands):
             t, is_str, val = v
-            o.append(
-                f"{t}:{struct.pack('d', val).hex()}"
-            ) if t == "Double" else o.append(f"{t}:{val}")
+            if t == "Double":
+                # exact LE bytes, not str(float) which loses NaN payloads / -0.0
+                o.append(f"{t}:{bytes(from_double(val)).hex()}")
+            else:
+                o.append(f"{t}:{val}")
 
             if is_str:
-                s, _ = hbc.getString(val)
+                try:
+                    s, _ = hbc.getString(val)
+                except (AssertionError, IndexError):
+                    print(
+                        f"[!] Function {i}: bad string index {val}, leaving blank",
+                        file=sys.stderr,
+                    )
+                    s = ""
                 ss.append((ii, val, s))
 
         f.write(f"{', '.join(o)}\n")
@@ -201,11 +210,15 @@ def read_func(func_asms, i, version):
         operands = []
         for oper in inst_words[1:]:
             oper_t, val = oper.replace(",", "").split(":")
-            val = (
-                struct.unpack("d", bytes.fromhex(val))[0]
-                if oper_t == "Double"
-                else int(val)
-            )
+            if oper_t == "Double":
+                # old dumps wrote decimal (always has a '.'/'e'); hex is exactly 16 hex digits
+                val = (
+                    to_double(bytes.fromhex(val))
+                    if re.fullmatch(r"[0-9a-fA-F]{16}", val)
+                    else float(val)
+                )
+            else:
+                val = int(val)
             operands.append((oper_t, False, val))
 
         insts.append((opcode, operands))

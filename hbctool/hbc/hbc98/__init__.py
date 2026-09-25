@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import sys
 from hbctool.util import *
 from .parser import parse, export, INVALID_LENGTH
 from .translator import disassemble, assemble
@@ -31,10 +32,30 @@ TagMask = 0x70
 
 class HBC98:
     def __init__(self, f=None):
+        self._instsCache = {}  # not on self.obj: would bloat metadata.json
         if f:
             self.obj = parse(f)
+            self._computeCleanFlags()
         else:
             self.obj = None
+
+    def _computeCleanFlags(self):
+        # A function is "clean" if its bytes survive a disasm/reasm round trip;
+        # unclean ones are left untouched on write instead of corrupted.
+        obj = self.obj
+        inst = obj["inst"]
+        instOffset = obj["instOffset"]
+        for fid, functionHeader in enumerate(obj["functionHeaders"]):
+            start = functionHeader["offset"] - instOffset
+            bc = inst[start : start + functionHeader["bytecodeSizeInBytes"]]
+            try:
+                insts = disassemble(bc)
+                clean = bytes(assemble(fid, insts)) == bytes(bc)
+            except Exception:
+                clean = False
+            functionHeader["clean"] = clean
+            if clean:
+                self._instsCache[fid] = insts  # reused by getFunction()
 
     def export(self, f):
         export(self.getObj(), f)
@@ -45,6 +66,9 @@ class HBC98:
 
     def setObj(self, obj):
         self.obj = obj
+        functionHeaders = obj.get("functionHeaders") or []
+        if functionHeaders and "clean" not in functionHeaders[0]:
+            self._computeCleanFlags()  # missing flags, e.g. a hand-built obj
 
     def getVersion(self):
         return 98
@@ -73,9 +97,30 @@ class HBC98:
         bc = self.getObj()["inst"][start:end]
         insts = bc
         if disasm:
-            insts = disassemble(bc)
+            # couldn't decode this one cleanly; empty body, bytes kept on write
+            if functionHeader.get("clean", True):
+                insts = self._instsCache.get(fid)
+                if insts is None:
+                    insts = disassemble(bc)
+            else:
+                insts = []
 
-        functionNameStr, _ = self.getString(functionName)
+        try:
+            functionNameStr, _ = self.getString(functionName)
+        except (AssertionError, IndexError):
+            print(
+                f"[!] Function {fid}: bad functionName string index {functionName}, using placeholder",
+                file=sys.stderr,
+            )
+            functionNameStr = "fn" + str(functionName)
+        # keep it on one line inside Function<...>
+        functionNameStr = (
+            functionNameStr.replace("\n", " ")
+            .replace("\r", " ")
+            .replace("\t", " ")
+            .replace("<", "(")
+            .replace(">", ")")
+        )
 
         return (
             functionNameStr,
@@ -101,6 +146,10 @@ class HBC98:
         ) = func
 
         functionHeader = self.getObj()["functionHeaders"][fid]
+
+        # wasn't disassembled, so don't touch its bytes
+        if not functionHeader.get("clean", True):
+            return
 
         functionHeader["paramCount"] = paramCount
         functionHeader["frameSize"] = registerCount
